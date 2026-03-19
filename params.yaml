@@ -1,0 +1,52 @@
+cluster:
+  nstar:         !!int 100000 # number of stars
+  virial_radius:  !!float 3 # in pc
+
+cmc:
+  w_0:            !!int 6 # for 'king'
+  gamma:          !!float 4 # for 'elson'
+  cluster_profile:        'king'
+  binfrac_model: 0.
+  primary_model: 'kroupa01'
+  ecc_model: 'thermal' 
+  porb_model: 'log_uniform'
+  qmin: 0.1 
+  m2_min: 0.08
+  met: 0.00017
+  zsun: 0.017
+  seed: 12345
+  virial_radius: 1.0
+  tidal_radius: !!float 1.0e6
+
+gas:
+  add_gas: True
+  M_gas:          !!float 1e4 # in Msun
+  a_gas:          !!float 1 # in pc
+  res_gas:        !!float 5e-3
+  B_at_center:    !!float 100 # in muG
+  T_at_center:    !!float 1e3 
+  T_at_edge:    !!float 100
+  gamma:        !!float 1.4
+  mu:           !!float 2.3
+
+bh:
+  add_bh: True
+  M1: 5000
+  M2: 5000
+  a: 0.5 # in pc
+
+box:
+  periodic_box: True
+  box_size: 30
+
+field:
+  Nx: !!int 320
+  compensate_sigma: True
+
+snapshot:
+  Munit_in_Msun: !!float 1e10
+  lunit_in_pc: !!float 1e3
+  vunit_in_kms: !!float 1.
+  Bunit_in_G: !!float 1
+  file: 'output.hdf5'
+  
