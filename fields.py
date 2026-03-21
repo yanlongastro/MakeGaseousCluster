@@ -45,12 +45,12 @@ def generate_periodic_B_with_envelope(shape, power_spectrum_func, envelope_func,
     K2 = KX**2 + KY**2 + KZ**2
     K2[0,0,0] = 1
     
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed=seed)
     
     # 2. Gaussian random amp. for A
-    A_hat_x = (np.random.normal(0, 1, shape) + 1j*np.random.normal(0, 1, shape))
-    A_hat_y = (np.random.normal(0, 1, shape) + 1j*np.random.normal(0, 1, shape))
-    A_hat_z = (np.random.normal(0, 1, shape) + 1j*np.random.normal(0, 1, shape))
+    A_hat_x = (rng.normal(0, 1, shape) + 1j*rng.normal(0, 1, shape))
+    A_hat_y = (rng.normal(0, 1, shape) + 1j*rng.normal(0, 1, shape))
+    A_hat_z = (rng.normal(0, 1, shape) + 1j*rng.normal(0, 1, shape))
     
     # 3. Apply power sepctrum
     power = power_spectrum_func(np.sqrt(K2)) / np.sqrt(K2)  # note the additional k
@@ -134,11 +134,13 @@ def generate_random_v_with_envelope(shape, power_spectrum_func, envelope_func, s
     k2[0,0,0] = 1
 
     total_power = power_spectrum_func(np.sqrt(k2))
+
+    rng = np.random.default_rng(seed=seed)
     
     # 1. A for the div-free part
-    A_hat_x = (np.random.normal(0, 1, shape) + 1j*np.random.normal(0, 1, shape))
-    A_hat_y = (np.random.normal(0, 1, shape) + 1j*np.random.normal(0, 1, shape))
-    A_hat_z = (np.random.normal(0, 1, shape) + 1j*np.random.normal(0, 1, shape))
+    A_hat_x = (rng.normal(0, 1, shape) + 1j*rng.normal(0, 1, shape))
+    A_hat_y = (rng.normal(0, 1, shape) + 1j*rng.normal(0, 1, shape))
+    A_hat_z = (rng.normal(0, 1, shape) + 1j*rng.normal(0, 1, shape))
     
     A_hat = np.array([A_hat_x, A_hat_y, A_hat_z]) * np.sqrt(total_power /np.sqrt(k2) /2 * sol_ratio)
     
@@ -149,7 +151,7 @@ def generate_random_v_with_envelope(shape, power_spectrum_func, envelope_func, s
     ])
     
     # 2. phi for the curl-free part
-    phi_hat = (np.random.normal(0, 1, shape) + 1j*np.random.normal(0, 1, shape))
+    phi_hat = (rng.normal(0, 1, shape) + 1j*rng.normal(0, 1, shape))
     phi_hat = phi_hat * np.sqrt(total_power / np.sqrt(k2) * (1-sol_ratio))
     
     v_comp_hat = np.array([

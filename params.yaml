@@ -24,13 +24,14 @@ gas:
   a_gas:          !!float 1 # in pc
   res_gas:        !!float 5e-3
   B_at_center:    !!float 100 # in muG
-  T_at_center:    !!float 1e3 
+  T_at_center:    !!float 1000
   T_at_edge:    !!float 100
+  a_T:          !!float 1
   gamma:        !!float 1.4
   mu:           !!float 2.3
 
 bh:
-  add_bh: True
+  add_bh: False
   M1: 5000
   M2: 5000
   a: 0.5 # in pc
@@ -40,7 +41,7 @@ box:
   box_size: 30
 
 field:
-  Nx: !!int 320
+  Nx: !!int 400
   compensate_sigma: True
 
 snapshot:

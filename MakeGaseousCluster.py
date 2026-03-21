@@ -119,7 +119,8 @@ class MakeGaseousCluster:
             sigmas_gas_only = np.array([utils.sigma_r_from_Jeans(x, self.rho_func_gas_only, self.Menc_func_gas_only, rmin, rmax, G=G) for x in r])
             sigmas_gas_eff_composite = np.array([utils.sigma_r_from_Jeans(x, self.rho_func_gas_only, self.Menc_func_star_gas, rmin, rmax, G=G) for x in r])
             B_profile = self.params['gas']['B_at_center']*1e-6 * (rho_gas/rho_gas[0])**0.5 # gauss
-            T_profile = (rho_gas/rho_gas[0]) *(self.params['gas']['T_at_center']-self.params['gas']['T_at_edge'])+self.params['gas']['T_at_edge']
+            T_profile = np.exp(-(r/self.params['gas']['a_T'])**2) \
+                *(self.params['gas']['T_at_center']-self.params['gas']['T_at_edge'])+self.params['gas']['T_at_edge']
             vA_profile = B_profile/np.sqrt(4*np.pi*rho_gas*self.internal_units.UnitDensity_in_cgs) /self.internal_units.UnitVelocity_in_cm_per_s
             cs_profile = np.sqrt(self.params['gas']['gamma']*cu.kB_cgs*T_profile/(cu.mp_cgs*self.params['gas']['mu'])) /self.internal_units.UnitVelocity_in_cm_per_s
             # now, note that sigma_eff^2 = sigma_r^2+cs^2+vA^2
@@ -138,10 +139,10 @@ class MakeGaseousCluster:
         
 
         if debug:
-            plt.plot(r, sigmas_star_only/np.sqrt(G*M_star/virial_radius), 'k--', label='stars only')
+            plt.plot(r, sigmas_star_only/np.sqrt(G*M_star/virial_radius), 'k--', label='stars (standalone)')
             if self.params['gas']['add_gas']:
                 plt.plot(r, sigmas_star_composite/np.sqrt(G*M_star/virial_radius), 'k:', label='star (in composite)')
-                plt.plot(r, sigmas_gas_only/np.sqrt(G*M_star/virial_radius), 'r--', label='gas only')
+                plt.plot(r, sigmas_gas_only/np.sqrt(G*M_star/virial_radius), 'r--', label='gas (standalone)')
                 plt.plot(r, sigmas_gas_eff_composite/np.sqrt(G*M_star/virial_radius), 'g-', label='gas effective (in composite)')
                 plt.plot(r, sigmas_gas_composite/np.sqrt(G*M_star/virial_radius), 'g--', label='gas kinetic (in composite)')
                 plt.plot(r, vA_profile/np.sqrt(G*M_star/virial_radius), 'g:', label='gas Alfvenic (in composite)')
@@ -288,7 +289,7 @@ class MakeGaseousCluster:
                         vels[:,j][cut] += dv
                 i += dN
 
-
+        vels -= np.mean(vels, axis=0)
         self.gas_data['Velocities'] = vels
 
         if debug:
@@ -368,6 +369,8 @@ class MakeGaseousCluster:
                 x = self.gas_data['Coordinates']
                 plt.scatter(x[:,0], x[:,1], s=.01, alpha=.5)
             plt.gca().set_aspect(1)
+            plt.xlabel(r'$x$ [pc]')
+            plt.ylabel(r'$y$ [pc]')
             plt.show()
 
     def save_dict_to_hdf5(self, F, dict_dat, part_type, num_part):
