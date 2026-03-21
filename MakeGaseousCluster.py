@@ -8,6 +8,7 @@ import h5py
 
 import utils
 import fields
+import constants_units as cu
 import importlib
 importlib.reload(utils)
 importlib.reload(fields)
@@ -16,7 +17,7 @@ import matplotlib.pyplot as plt
 
 class MakeGaseousCluster:
     def __init__(self, param_file='params.yaml', debug=False):
-        self.read_params(param_file)
+        self.read_params(param_file, debug=debug)
         Singles = self.make_cmc_ic()
         self.eval_profile_interpolators(Singles, debug=debug)
         self.set_star_particles(Singles, debug=debug)
@@ -28,7 +29,7 @@ class MakeGaseousCluster:
         self.check_bc(debug=debug)
         self.write_snapshot()
 
-    def read_params(self, param_file):
+    def read_params(self, param_file, debug=False):
         with open(param_file, 'r') as f:
             params = yaml.safe_load(f)
         params['cmc']['size'] = params['cluster']['nstar']
@@ -41,17 +42,20 @@ class MakeGaseousCluster:
         if not self.params['gas']['add_gas']:
             assert self.M_gas==0
 
-        # unit: Msun, pc, km/s
-        Munit_in_Msun = params['snapshot']['Munit_in_Msun']
-        lunit_in_au = 206265*params['snapshot']['lunit_in_pc']
-        vunit_in_kms = params['snapshot']['vunit_in_kms']
-        tunit_in_yr = lunit_in_au/vunit_in_kms*1.496e8/(86400*365)
-        self.G = 4*np.pi**2 *(1/lunit_in_au)**3/(1/tunit_in_yr)**2/(1/Munit_in_Msun)
-        self.Munit_in_Msun = Munit_in_Msun
-        self.lunit_in_pc = params['snapshot']['lunit_in_pc']
-        self.vunit_in_kms = vunit_in_kms
-        self.Bunit_in_G = params['snapshot']['Bunit_in_G']
-        print('G =', self.G)
+        # units
+        self.snapshot_units = cu.units(params['snapshot']['UnitMass_in_g'],
+                                        params['snapshot']['UnitLength_in_cm'],
+                                        params['snapshot']['UnitVelocity_in_cm_per_s'],
+                                        params['snapshot']['UnitMagneticField_in_gauss']
+                              )
+        self.internal_units = cu.units(cu.Msun_cgs,
+                                       cu.pc_cgs,
+                                       1e5,
+                                       1
+                              )
+        if debug:
+            print('Snapshot G =', self.snapshot_units.G)
+            print('Internal G =', self.internal_units.G)
 
     def make_cmc_ic(self):
         print("Making CMC IC")
@@ -106,15 +110,21 @@ class MakeGaseousCluster:
         # note that below we redefine r, so it only covers the box but not rmax
         r =  np.linspace(0, self.params['box']['box_size'], 10000)
 
-        tunit_in_yr = 206265*1.496e8/(86400*365)
-        G = 4*np.pi**2 *(1/206265)**3/(1/tunit_in_yr)**2
+        G = self.internal_units.G
         sigmas_star_only = np.array([utils.sigma_r_from_Jeans(x, self.rho_func_star_only, self.Menc_func_star_only, rmin, rmax, G=G) for x in r])
         sigmas_star_only[np.isnan(sigmas_star_only)] = np.nanmin(sigmas_star_only)
         if self.params['gas']['add_gas']:
             sigmas_star_composite = np.array([utils.sigma_r_from_Jeans(x, self.rho_func_star_only, self.Menc_func_star_gas, rmin, rmax, G=G) for x in r])
             sigmas_star_composite[np.isnan(sigmas_star_composite)] = np.nanmin(sigmas_star_composite)
             sigmas_gas_only = np.array([utils.sigma_r_from_Jeans(x, self.rho_func_gas_only, self.Menc_func_gas_only, rmin, rmax, G=G) for x in r])
-            sigmas_gas_composite = np.array([utils.sigma_r_from_Jeans(x, self.rho_func_gas_only, self.Menc_func_star_gas, rmin, rmax, G=G) for x in r])
+            sigmas_gas_eff_composite = np.array([utils.sigma_r_from_Jeans(x, self.rho_func_gas_only, self.Menc_func_star_gas, rmin, rmax, G=G) for x in r])
+            B_profile = self.params['gas']['B_at_center']*1e-6 * (rho_gas/rho_gas[0])**0.5 # gauss
+            T_profile = (rho_gas/rho_gas[0]) *(self.params['gas']['T_at_center']-self.params['gas']['T_at_edge'])+self.params['gas']['T_at_edge']
+            vA_profile = B_profile/np.sqrt(4*np.pi*rho_gas*self.internal_units.UnitDensity_in_cgs) /self.internal_units.UnitVelocity_in_cm_per_s
+            cs_profile = np.sqrt(self.params['gas']['gamma']*cu.kB_cgs*T_profile/(cu.mp_cgs*self.params['gas']['mu'])) /self.internal_units.UnitVelocity_in_cm_per_s
+            # now, note that sigma_eff^2 = sigma_r^2+cs^2+vA^2
+            sigmas_gas_composite = np.sqrt(sigmas_gas_eff_composite**2 -vA_profile**2 -cs_profile**2)
+            sigmas_gas_composite[np.isnan(sigmas_gas_composite)] = 0.1 # km/s, to avoid nans
 
         self.star_only_sigma_r = interpolate.InterpolatedUnivariateSpline(r, sigmas_star_only)
         if self.params['gas']['add_gas']:
@@ -122,10 +132,8 @@ class MakeGaseousCluster:
             self.star_composite_sigma_r = interpolate.InterpolatedUnivariateSpline(r, sigmas_star_composite)
             self.gas_sigma_r_envelope = interpolate.InterpolatedUnivariateSpline(r, sigmas_gas_composite)
             self.gas_vel_envelope_normalized = interpolate.InterpolatedUnivariateSpline(r/self.params['box']['box_size'], np.sqrt(3)*sigmas_gas_composite)
-            self.gas_B_envelope_normalized = interpolate.InterpolatedUnivariateSpline(r/self.params['box']['box_size'], 
-                                                                                    self.params['gas']['B_at_center']*1e-6/self.Bunit_in_G* (rho_gas/rho_gas[0])**0.5 )
-            self.gas_T_envelope = interpolate.InterpolatedUnivariateSpline(r, 
-                                (rho_gas/rho_gas[0])*(self.params['gas']['T_at_center']-self.params['gas']['T_at_edge'])+self.params['gas']['T_at_edge'])
+            self.gas_B_envelope_normalized = interpolate.InterpolatedUnivariateSpline(r/self.params['box']['box_size'], B_profile)
+            self.gas_T_envelope = interpolate.InterpolatedUnivariateSpline(r, T_profile)
 
         
 
@@ -134,7 +142,10 @@ class MakeGaseousCluster:
             if self.params['gas']['add_gas']:
                 plt.plot(r, sigmas_star_composite/np.sqrt(G*M_star/virial_radius), 'k:', label='star (in composite)')
                 plt.plot(r, sigmas_gas_only/np.sqrt(G*M_star/virial_radius), 'r--', label='gas only')
-                plt.plot(r, sigmas_gas_composite/np.sqrt(G*M_star/virial_radius), 'r:', label='gas (in composite)')
+                plt.plot(r, sigmas_gas_eff_composite/np.sqrt(G*M_star/virial_radius), 'g-', label='gas effective (in composite)')
+                plt.plot(r, sigmas_gas_composite/np.sqrt(G*M_star/virial_radius), 'g--', label='gas kinetic (in composite)')
+                plt.plot(r, vA_profile/np.sqrt(G*M_star/virial_radius), 'g:', label='gas Alfvenic (in composite)')
+                plt.plot(r, cs_profile/np.sqrt(G*M_star/virial_radius), 'g-.', label='gas sound (in composite)')
 
             r_, sigma_ = utils.measure_spherical_density_profile(Singles['vr'], Singles['r'], sigma=True, dN=1000)
             plt.plot(r_, sigma_, label='raw IC')
@@ -146,8 +157,8 @@ class MakeGaseousCluster:
 
     def set_star_particles(self, Singles, debug=False):
         print("Setting stars")
-        mass = np.array(Singles['m'])/self.Munit_in_Msun
-        radius = np.array(Singles['r'])/self.lunit_in_pc
+        mass = np.array(Singles['m'])
+        radius = np.array(Singles['r'])
         vt = np.array(Singles['vt'])
         vr = np.array(Singles['vr'])
         v = np.sqrt(vt**2+vr**2)
@@ -158,12 +169,12 @@ class MakeGaseousCluster:
         vel = utils.uniform_sampling_on_spherical(nstar, seed=45)*v[:,np.newaxis]
         vel -= np.mean(vel, axis=0)
 
-        PE = 0.5*np.sum(mass*pytreegrav.Potential(pos, mass, G=self.G))
+        PE = 0.5*np.sum(mass*pytreegrav.Potential(pos, mass, G=self.internal_units.G))
         KE = 0.5*np.sum(mass*np.linalg.norm(vel, axis=-1)**2)
         vel_fac = np.sqrt(-PE/(KE*2))
         vel *= vel_fac
         
-        PE = 0.5*np.sum(mass*pytreegrav.Potential(pos, mass, G=self.G))
+        PE = 0.5*np.sum(mass*pytreegrav.Potential(pos, mass, G=self.internal_units.G))
         KE = 0.5*np.sum(mass*np.linalg.norm(vel, axis=-1)**2)
         print(" (2T+U)/U = %g"%((PE+2*KE)/PE))
 
@@ -182,13 +193,13 @@ class MakeGaseousCluster:
         if debug:
             for i in range(3):
                 r_, sigma_ = utils.measure_spherical_density_profile(vel[:,i], pos, sigma=True, dN=1000)
-                plt.plot(r_, sigma_,)
-            plt.loglog()
+                plt.semilogx(r_, sigma_, label='$\sigma_{%s}$'%('xyz'[i]))
             if self.params['gas']['add_gas']:
-                plt.plot(r_, self.star_composite_sigma_r(r_*self.lunit_in_pc), 'k--')
-            plt.plot(r_, self.star_only_sigma_r(r_*self.lunit_in_pc), 'k:')
-            plt.xlabel('Radius')
-            plt.ylabel('$\sigma_{1d}$')
+                plt.plot(r_, self.star_composite_sigma_r(r_), 'k--', label='$\sigma_r$ (in composite)')
+            plt.plot(r_, self.star_only_sigma_r(r_), 'k:', label='$\sigma_r$ (standalone)')
+            plt.xlabel('Radius [pc]')
+            plt.ylabel('$\sigma_{1d}$ [km/s]')
+            plt.legend()
             plt.show()
 
 
@@ -213,15 +224,15 @@ class MakeGaseousCluster:
         x = x[cut]
         r = np.linalg.norm(x, axis=-1)
         T = self.gas_T_envelope(r)
-        U = 1.38e-16/1.67e-24*T/(self.params['gas']['gamma']-1) /self.params['gas']['mu']
-        U /= (self.vunit_in_kms*1e5)**2
+        U = cu.kB_cgs*T/(cu.mp_cgs*self.params['gas']['mu'])/(self.params['gas']['gamma']-1) # cgs
+        U /= (self.internal_units.UnitVelocity_in_cm_per_s)**2
 
         m = np.ones(x.shape[0])*self.params['gas']['res_gas']
 
         # set gas data
         self.gas_data = {}
-        self.gas_data['Masses'] = m/self.Munit_in_Msun
-        self.gas_data['Coordinates'] = x/self.lunit_in_pc
+        self.gas_data['Masses'] = m
+        self.gas_data['Coordinates'] = x
         ids = np.max(self.star_data['ParticleIDs'])*10 + np.arange(len(m))
         self.gas_data["ParticleIDs"] = ids
         self.gas_data["InternalEnergy"] = U
@@ -229,9 +240,10 @@ class MakeGaseousCluster:
         if debug:
             r_, rho_ = utils.measure_spherical_density_profile(m, x, sigma=False, dN=1000)
             plt.loglog(r_, rho_, label='raw IC')
-            plt.loglog(r_, self.rho_func_gas_only(r_), 'k--')
-            plt.xlabel("Radius")
-            plt.ylabel("Gas density")
+            plt.loglog(r_, self.rho_func_gas_only(r_), 'k--', label='model')
+            plt.legend()
+            plt.xlabel("Radius [pc]")
+            plt.ylabel(r"Gas density [$\rm M_\odot/pc^3$]")
             plt.show()
 
     def power_spectrum_func(self, k):
@@ -243,7 +255,7 @@ class MakeGaseousCluster:
 
     def set_velocity_field(self, debug=False):
         print("Setting gas velocity")
-        x = np.copy(self.gas_data['Coordinates'])*self.lunit_in_pc
+        x = np.copy(self.gas_data['Coordinates'])
         x += self.params['box']['box_size']/2
         x /= self.params['box']['box_size']
         assert x.min()>0 and x.max()<1
@@ -285,18 +297,18 @@ class MakeGaseousCluster:
             v = self.gas_data['Velocities']
             x = self.gas_data['Coordinates']
             for i in range(3):
-                r_, sigma_ = utils.measure_spherical_density_profile(v[:,i], x*self.lunit_in_pc, sigma=True, dN=1000)
-                plt.plot(r_, sigma_*np.sqrt(3), label='raw IC')
-            plt.plot(r_, envelope_func(r_/self.params['box']['box_size']), 'k--')
-            plt.loglog()
-            plt.xlabel("Radius")
-            plt.ylabel("3D velocity dispersion")
+                r_, sigma_ = utils.measure_spherical_density_profile(v[:,i], x, sigma=True, dN=1000)
+                plt.plot(r_, sigma_, label='$\sigma_{%s}$'%('xyz'[i]))
+            plt.semilogx(r_, envelope_func(r_/self.params['box']['box_size'])/np.sqrt(3), 'k--', label='model')
+            plt.legend()
+            plt.xlabel("Radius [pc]")
+            plt.ylabel("1D velocity dispersion [km/s]")
             plt.show()
 
 
     def set_magnetic_field(self, debug=False):
         print("Setting gas magnetic field")
-        x = np.copy(self.gas_data['Coordinates'])*self.lunit_in_pc
+        x = np.copy(self.gas_data['Coordinates'])
         x += self.params['box']['box_size']/2
         x /= self.params['box']['box_size']
         assert x.min()>0 and x.max()<1
@@ -315,22 +327,21 @@ class MakeGaseousCluster:
             b = self.gas_data['MagneticField']
             x = self.gas_data['Coordinates']
             for i in range(3):
-                r_, sigma_ = utils.measure_spherical_density_profile(b[:,i], x*self.lunit_in_pc, sigma=True, dN=1000)
-                plt.plot(r_, sigma_*np.sqrt(3), label='raw IC')
-            plt.plot(r_, envelope_func(r_/self.params['box']['box_size']), 'k--')
+                r_, sigma_ = utils.measure_spherical_density_profile(b[:,i], x, sigma=True, dN=1000)
+                plt.plot(r_, sigma_, label=r'$B_{%s}$'%('xyz'[i]))
+            plt.plot(r_, envelope_func(r_/self.params['box']['box_size'])/np.sqrt(3), 'k--', label='model')
             plt.loglog()
-            plt.xlabel("Radius")
-            plt.ylabel("3D B dispersion")
+            plt.xlabel("Radius [pc]")
+            plt.ylabel("1D B dispersion [G]")
             plt.show()
 
     def add_bhs(self, debug=False):
         if not self.params['bh']['add_bh']:
             return
-        a = self.params['bh']['a']/self.lunit_in_pc
-        M1 = self.params['bh']['M1']/self.Munit_in_Msun
-        M2 = self.params['bh']['M2']/self.Munit_in_Msun
-        T = np.sqrt((a)**3*np.pi**2*4/self.G/(M1+M2))
-        v = np.sqrt(self.G*(M1+M2)/a)
+        a = self.params['bh']['a']
+        M1 = self.params['bh']['M1']
+        M2 = self.params['bh']['M2']
+        v = np.sqrt(self.internal_units.G*(M1+M2)/a)
         v1 = -M2/(M1+M2)*v
         v2 = M1/(M1+M2)*v
         x1 = -M2/(M1+M2)*a
@@ -345,9 +356,9 @@ class MakeGaseousCluster:
 
     def check_bc(self, debug=False):
         if self.params['box']['periodic_box']:
-            self.star_data['Coordinates'] += self.params['box']['box_size']/2 /self.lunit_in_pc
+            self.star_data['Coordinates'] += self.params['box']['box_size']/2
             if self.params['gas']['add_gas']:
-                self.gas_data['Coordinates'] += self.params['box']['box_size']/2 /self.lunit_in_pc
+                self.gas_data['Coordinates'] += self.params['box']['box_size']/2
         if debug:
             x = self.star_data['Coordinates']
             s = self.star_data["ProtoStellarStage"]
@@ -359,6 +370,33 @@ class MakeGaseousCluster:
             plt.gca().set_aspect(1)
             plt.show()
 
+    def save_dict_to_hdf5(self, F, dict_dat, part_type, num_part):
+        group_name = "PartType%d"%part_type
+        if part_type==0:
+            assert 'InternalEnergy' in dict_dat.keys()
+        print(group_name)
+        F.create_group(group_name)
+        for k in dict_dat.keys():
+            print(' ', k)
+            data = dict_dat[k]
+
+            # do some unit conversions
+            if k in ["Masses"]:
+                data *= self.internal_units.UnitMass_in_g / self.snapshot_units.UnitMass_in_g
+            if k in ["Coordinates"]:
+                data *= self.internal_units.UnitLength_in_cm / self.snapshot_units.UnitLength_in_cm
+            if k in ["Velocities"]:
+                data *= self.internal_units.UnitVelocity_in_cm_per_s / self.snapshot_units.UnitVelocity_in_cm_per_s
+            if k in ["MagneticField"]:
+                data *= self.internal_units.UnitMagneticField_in_gauss / self.snapshot_units.UnitMagneticField_in_gauss
+            if k in ['InternalEnergy']:
+                data *= (self.internal_units.UnitVelocity_in_cm_per_s / self.snapshot_units.UnitVelocity_in_cm_per_s)**2
+            
+            F[group_name].create_dataset(k, data=data)
+        num_part[part_type] = len(dict_dat['Masses'])
+        return num_part
+
+
     def write_snapshot(self):
         filename = self.params['snapshot']['file']
         with h5py.File(filename, "w") as F:
@@ -367,26 +405,12 @@ class MakeGaseousCluster:
             F["Header"].attrs["Time"] = 0.0
 
             if self.params['gas']['add_gas']:
-                part_type = "PartType0"
-                print(part_type)
-                F.create_group(part_type)
-                for k in self.gas_data.keys():
-                    print(' ', k)
-                    F[part_type].create_dataset(k, data=self.gas_data[k])
-                num_part[0] = len(self.gas_data['Masses'])
-            
-            part_type = "PartType5"
-            F.create_group(part_type)
-            print(part_type)
-            for k in self.star_data.keys():
-                print(' ', k)
-                F[part_type].create_dataset(k, data=self.star_data[k])
-            num_part[5] = len(self.star_data['Masses'])
+                num_part = self.save_dict_to_hdf5(F, self.gas_data, 0, num_part)
+            num_part = self.save_dict_to_hdf5(F, self.star_data, 5, num_part)
 
             # conclude
             F["Header"].attrs["NumPart_ThisFile"] = num_part
             F["Header"].attrs["NumPart_Total"] = num_part
-
 
 if __name__ == '__main__':
     MakeGaseousCluster()

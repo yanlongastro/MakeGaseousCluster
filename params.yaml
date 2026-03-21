@@ -44,9 +44,9 @@ field:
   compensate_sigma: True
 
 snapshot:
-  Munit_in_Msun: !!float 1e10
-  lunit_in_pc: !!float 1e3
-  vunit_in_kms: !!float 1.
-  Bunit_in_G: !!float 1
+  UnitMass_in_g: !!float 1.989e+43
+  UnitLength_in_cm: !!float 3.08568e+21
+  UnitVelocity_in_cm_per_s: !!float 1e5
+  UnitMagneticField_in_gauss: !!float 1
   file: 'output.hdf5'
   
