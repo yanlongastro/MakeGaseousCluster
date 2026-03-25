@@ -28,7 +28,7 @@ gas:
   T_at_edge:    !!float 100
   a_T:          !!float 1
   gamma:        !!float 1.4
-  mu:           !!float 2.3
+  mu:           !!float 2
 
 bh:
   add_bh: False
@@ -43,6 +43,7 @@ box:
 field:
   Nx: !!int 400
   compensate_sigma: True
+  turbulent_B_field: True # turbulent or uniform
 
 snapshot:
   UnitMass_in_g: !!float 1.989e+43

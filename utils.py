@@ -12,28 +12,31 @@ def uniform_sampling_on_spherical(npoints, ndim=3, seed=42):
     vec /= np.linalg.norm(vec, axis=0)
     return vec.T
 
-def measure_spherical_density_profile(mass, radius, dN=100, cdf=False, sigma=False):
-    i = 0
+def measure_spherical_profile(mass, radius, dN=1000, method='density'):
+    assert method in ['density', 'std', 'mean', 'cdf', 'rms']
     if radius.ndim>1:
         radius = np.linalg.norm(radius, axis=-1)
     sort = np.argsort(radius)
     radius = radius[sort]
     mass = mass[sort]
-    if cdf:
-        return radius, np.cumsum(mass)
+    if method=='cdf':
+        return radius, np.cumsum(mass, axis=0)
 
     r = []
     rho = []
+    i = 0
     while i+dN<len(mass):
-        if sigma:
-            dM = np.std(mass[i:i+dN])
-            r1 = radius[i+dN] 
-            r0 = radius[i]
-            dV = 1
-        else:
-            dM = np.sum(mass[i:i+dN])
-            r1 = radius[i+dN] 
-            r0 = radius[i]
+        r1 = radius[i+dN] 
+        r0 = radius[i]
+        dV = 1
+        if method=='std':
+            dM = np.std(mass[i:i+dN], axis=0)
+        if method=='mean':
+            dM = np.mean(mass[i:i+dN], axis=0)
+        if method=='rms':
+            dM = np.sqrt(np.mean(mass[i:i+dN]**2, axis=0))
+        if method=='density':
+            dM = np.sum(mass[i:i+dN], axis=0)
             dV = (r1**3-r0**3)*np.pi*4/3
         rho_tmp = dM/dV
         r_tmp = (r0+r1)/2
