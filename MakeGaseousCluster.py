@@ -121,15 +121,20 @@ class MakeGaseousCluster:
                 vA_profile = B_profile/np.sqrt(4*np.pi*rho_gas*self.internal_units.UnitDensity_in_cgs) /self.internal_units.UnitVelocity_in_cm_per_s
             else:
                 B_profile = np.repeat(self.params['gas']['B_at_center']*1e-6, len(r))
-                vA_profile = np.zeros_like(r) # !!!! this is purely mannual
+                vA_profile = B_profile/np.sqrt(4*np.pi*rho_gas*self.internal_units.UnitDensity_in_cgs) /self.internal_units.UnitVelocity_in_cm_per_s
             T_profile = np.exp(-(r/self.params['gas']['a_T'])**2) \
                 *(self.params['gas']['T_at_center']-self.params['gas']['T_at_edge'])+self.params['gas']['T_at_edge']
             cs_profile = np.sqrt(self.params['gas']['gamma']*cu.kB_cgs*T_profile/(cu.mp_cgs*self.params['gas']['mu'])) /self.internal_units.UnitVelocity_in_cm_per_s
             
             # now, note that sigma_eff^2 = sigma_r^2+cs^2+vA^2
-            sigmas_gas_composite = np.sqrt(sigmas_gas_eff_composite**2 -vA_profile**2 -cs_profile**2)
-            # sigmas_gas_composite = sigmas_gas_eff_composite # !!!!!
-            sigmas_gas_composite[np.isnan(sigmas_gas_composite)] = 0.1 # km/s, to avoid nans
+            sigma2_turb = sigmas_gas_eff_composite**2 - vA_profile**2 - cs_profile**2
+            n_over_pressured = np.sum(sigma2_turb < 0)
+            if n_over_pressured > 0:
+                print(f" Warning: {n_over_pressured} radial bins are over-pressured "
+                      f"(cs^2+vA^2 > sigma_eff^2); clamping turbulent sigma to 0.")
+            sigma2_turb = np.clip(sigma2_turb, 0, None)
+            sigmas_gas_composite = np.sqrt(sigma2_turb)
+            sigmas_gas_composite[np.isnan(sigmas_gas_composite)] = 0.0
 
         self.star_only_sigma_r = interpolate.InterpolatedUnivariateSpline(r, sigmas_star_only)
         if self.params['gas']['add_gas']:
@@ -346,7 +351,7 @@ class MakeGaseousCluster:
             results = gen.validate()
             
 
-        # vels -= np.mean(vels, axis=0)
+        vels -= np.mean(vels, axis=0)
         self.gas_data['Velocities'] = vels
 
         if debug:
@@ -385,7 +390,7 @@ class MakeGaseousCluster:
             B = fields.interpolate_vector_field_to_particles(Bx, By, Bz, x)
         else:
             print(" set a uniform B field")
-            B = np.array([0, 0, self.params['gas']['B_at_center']*1e-6]) * np.ones_like(self.gas_data['Coordinates'])[:,np.newaxis]
+            B = np.ones_like(self.gas_data['Coordinates']) * np.array([0, 0, self.params['gas']['B_at_center']*1e-6])
         self.gas_data['MagneticField'] = B
 
         if debug:

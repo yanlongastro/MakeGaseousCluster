@@ -105,10 +105,20 @@ def load_glass_coords(N, method='meshoid', glass_path='glass_256.npy'):
     returns xy in [-1, 1], z in [-1, 1]
     """
     if method == 'meshoid':
-        import meshoid
-        x = meshoid.glass.particle_glass(N=N, )
+        try:
+            import meshoid
+            x = meshoid.glass.particle_glass(N=N)
+        except ImportError:
+            print("meshoid not available, falling back to random uniform sampling")
+            rng = np.random.default_rng(seed=42)
+            x = rng.uniform(0, 1, (N * 3, 3))
     else:
-        x = np.load(glass_path)
+        try:
+            x = np.load(glass_path)
+        except FileNotFoundError:
+            print(f"{glass_path} not found, falling back to random uniform sampling")
+            rng = np.random.default_rng(seed=42)
+            x = rng.uniform(0, 1, (N * 3, 3))
     while len(x)<N*3:
         print("Doing refinement")
         x = refine_in_xyz(x)
